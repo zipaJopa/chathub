@@ -24,8 +24,20 @@ type LicenseKey = {
 }
 
 async function validateLicense(key: string, instanceId: string): Promise<LicenseKey> {
-  // Always return a valid response
-  return { valid: true }
+  // Check if the request is made to localhost
+  if (window.location.hostname === 'localhost') {
+    return { valid: true }
+  }
+
+  // Make the actual API request for license validation
+  const resp = await ofetch('https://api.lemonsqueezy.com/v1/licenses/validate', {
+    method: 'POST',
+    body: {
+      license_key: key,
+      instance_id: instanceId,
+    },
+  })
+  return { valid: resp.valid }
 }
 
 export { activateLicense, deactivateLicense, validateLicense }
