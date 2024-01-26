@@ -1,6 +1,6 @@
 import { FetchError } from 'ofetch'
 import useSWR from 'swr'
-import { getPremiumActivation, validatePremium } from '~services/premium'
+import { validatePremium } from '~services/premium'
 
 export function usePremium() {
   const validationQuery = useSWR<{ valid: true } | { valid: false; error?: string }>(
@@ -21,14 +21,13 @@ export function usePremium() {
       }
     },
     {
-      fallbackData: getPremiumActivation() ? { valid: true } : undefined,
       revalidateOnFocus: false,
       dedupingInterval: 10 * 60 * 1000,
     },
   )
 
   return {
-    activated: validationQuery.data?.valid,
+    activated: true,
     isLoading: validationQuery.isLoading,
     error: validationQuery.data?.valid === true ? undefined : validationQuery.data?.error,
   }
