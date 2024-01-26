@@ -1,136 +1,118 @@
-import { Link } from '@tanstack/react-router'
-import { motion } from 'framer-motion'
-import { useAtom, useSetAtom } from 'jotai'
-import { useEffect, useState } from 'react'
+import { useSearch } from '@tanstack/react-router'
+import { get as getPath } from 'lodash-es'
+import { useCallback, useState } from 'react'
+import ConfettiExplosion from 'react-confetti-explosion'
+import { Toaster } from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
-import allInOneIcon from '~/assets/all-in-one.svg'
-import collapseIcon from '~/assets/icons/collapse.svg'
-import feedbackIcon from '~/assets/icons/feedback.svg'
-import githubIcon from '~/assets/icons/github.svg'
-import settingIcon from '~/assets/icons/setting.svg'
-import themeIcon from '~/assets/icons/theme.svg'
-import minimalLogo from '~/assets/minimal-logo.svg'
-import logo from '~/assets/santa-logo.png'
-import { cx } from '~/utils'
-import { useEnabledBots } from '~app/hooks/use-enabled-bots'
-import { releaseNotesAtom, showDiscountModalAtom, sidebarCollapsedAtom } from '~app/state'
-import { getPremiumActivation } from '~services/premium'
-import { checkReleaseNotes } from '~services/release-notes'
-import * as api from '~services/server-api'
-import { getAppOpenTimes, getPremiumModalOpenTimes } from '~services/storage/open-times'
-import GuideModal from '../GuideModal'
-import ThemeSettingModal from '../ThemeSettingModal'
-import Tooltip from '../Tooltip'
-import NavLink from './NavLink'
-import PremiumEntry from './PremiumEntry'
+import Button from '~app/components/Button'
+import DiscountBadge from '~app/components/Premium/DiscountBadge'
+import FeatureList from '~app/components/Premium/FeatureList'
+import PriceSection from '~app/components/Premium/PriceSection'
+import { usePremium } from '~app/hooks/use-premium'
+import { useDiscountCode } from '~app/hooks/use-purchase-info'
+import { trackEvent } from '~app/plausible'
+import { getPremiumActivation } from '../../services/premium'
 
-function IconButton(props: { icon: string; onClick?: () => void }) {
+function PremiumPage() {
+  const { t } = useTranslation()
+  const premiumState = usePremium()
+  const [activating, setActivating] = useState(false)
+  const [deactivating, setDeactivating] = useState(false)
+  const [activationError, setActivationError] = useState('')
+  const { source } = useSearch({ from: premiumRoute.id })
+  const [isExploding, setIsExploding] = useState(false)
+  const discountCode = useDiscountCode()
+
+  const activate = useCallback(async () => {
+    const key = window.prompt('Enter your license key', '')
+    if (!key) {
+      return
+    }
+    setActivationError('')
+    setActivating(true)
+    trackEvent('activate_license')
+    try {
+      await activatePremium(key)
+    } catch (err) {
+      console.error('activation', err)
+      setActivationError(getPath(err, 'data.error') || 'Activation failed')
+      setActivating(false)
+      return
+    }
+    setTimeout(() => location.reload(), 500)
+  }, [])
+
+  const deactivateLicense = useCallback(async () => {
+    if (!window.confirm('Are you sure to deactivate this device?')) {
+      return
+    }
+    setDeactivating(true)
+    trackEvent('deactivate_license')
+    await deactivatePremium()
+    setTimeout(() => location.reload(), 500)
+  }, [])
+
   return (
-    <div
-      className="p-[6px] rounded-[10px] w-fit cursor-pointer hover:opacity-80 bg-secondary bg-opacity-20"
-      onClick={props.onClick}
-    >
-      <img src={props.icon} className="w-6 h-6" />
+    <div className="flex flex-col bg-primary-background dark:text-primary-text rounded-[20px] h-full p-[50px] overflow-y-auto">
+      <h1 className="font-bold text-[40px] leading-none text-primary-text">{t('Premium')}</h1>
+      <div className="flex flex-col gap-4 mt-9">
+        <DiscountBadge />
+        <PriceSection align="left" />
+      </div>
+      <div className="mt-8">
+        <FeatureList />
+      </div>
+      <div className="flex flex-row items-center gap-3 mt-10">
+        {premiumState.activated ? (
+          <>
+            <Button
+              text={t('ð License activated')}
+              color="primary"
+              className="w-fit !py-2"
+              onClick={() => setIsExploding(true)}
+            />
+            <Button
+              text={t('Deactivate')}
+              className="w-fit !py-2"
+              onClick={deactivateLicense}
+              isLoading={deactivating}
+            />
+          </>
+        ) : (
+          <>
+            <a
+              href={`https://chathub.gg/api/premium/redirect?discountCode=${discountCode || ''}`}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => trackEvent('click_buy_premium', { source: 'premium_page' })}
+            >
+              <Button text={t('Buy premium license')} color="primary" className="w-fit !py-2 rounded-lg" />
+            </a>
+            <Button
+              text={t('Activate license')}
+              color="flat"
+              className="w-fit !py-2 rounded-lg"
+              onClick={activate}
+              isLoading={activating || premiumState.isLoading}
+            />
+          </>
+        )}
+        <a
+          href="https://app.lemonsqueezy.com/my-orders/"
+          target="_blank"
+          rel="noreferrer"
+          className="underline ml-2 text-sm text-secondary-text font-medium w-fit"
+        >
+          {t('Manage order and devices')}
+        </a>
+      </div>
+      {!!(premiumState.error || activationError) && (
+        <span className="mt-3 text-red-500 font-medium">{premiumState.error || activationError}</span>
+      )}
+      <Toaster position="top-right" />
+      {isExploding && <ConfettiExplosion duration={3000} onComplete={() => setIsExploding(false)} />}
     </div>
   )
 }
 
-function Sidebar() {
-  const { t } = useTranslation()
-  const [collapsed, setCollapsed] = useAtom(sidebarCollapsedAtom)
-  const [themeSettingModalOpen, setThemeSettingModalOpen] = useState(false)
-  const enabledBots = useEnabledBots()
-  const setShowDiscountModal = useSetAtom(showDiscountModalAtom)
-  const setReleaseNotes = useSetAtom(releaseNotesAtom)
-
-  useEffect(() => {
-    Promise.all([getAppOpenTimes(), getPremiumModalOpenTimes(), checkReleaseNotes()]).then(
-      async ([appOpenTimes, premiumModalOpenTimes, releaseNotes]) => {
-        if (!getPremiumActivation()) {
-          const { show, campaign } = await api.checkDiscount({ appOpenTimes, premiumModalOpenTimes })
-          if (show) {
-            setShowDiscountModal(true)
-            return
-          }
-          if (campaign) {
-            setShowDiscountModal(campaign)
-            return
-          }
-        }
-        setReleaseNotes(releaseNotes)
-      },
-    )
-  }, [])
-
-  return (
-    <motion.aside
-      className={cx(
-        'flex flex-col bg-primary-background bg-opacity-40 overflow-hidden',
-        collapsed ? 'items-center px-[15px]' : 'w-[230px] px-4',
-      )}
-    >
-      <div className={cx('flex mt-8 gap-3 items-center', collapsed ? 'flex-col-reverse' : 'flex-row justify-between')}>
-        {collapsed ? <img src={minimalLogo} className="w-[30px]" /> : <img src={logo} className="w-[100px] ml-2" />}
-        <motion.img
-          src={collapseIcon}
-          className={cx('w-6 h-6 cursor-pointer')}
-          animate={{ rotate: collapsed ? 180 : 0 }}
-          onClick={() => setCollapsed((c) => !c)}
-        />
-      </div>
-      <div className="flex flex-col gap-[13px] mt-10 overflow-y-auto scrollbar-none">
-        <NavLink to="/" text={'All-In-One'} icon={allInOneIcon} iconOnly={collapsed} />
-        {enabledBots.map(({ botId, bot }) => (
-          <NavLink
-            key={botId}
-            to="/chat/$botId"
-            params={{ botId }}
-            text={bot.name}
-            icon={bot.avatar}
-            iconOnly={collapsed}
-          />
-        ))}
-      </div>
-      <div className="mt-auto pt-2">
-        {!collapsed && <hr className="border-[#ffffff4d]" />}
-        {!collapsed && (
-          <div className="my-5">
-            <PremiumEntry text={t('Premium')} />
-          </div>
-        )}
-        <div className={cx('flex mt-5 gap-[10px] mb-4', collapsed ? 'flex-col' : 'flex-row ')}>
-          {!collapsed && (
-            <Tooltip content={t('GitHub')}>
-              <a href="https://github.com/chathub-dev/chathub?utm_source=extension" target="_blank" rel="noreferrer">
-                <IconButton icon={githubIcon} />
-              </a>
-            </Tooltip>
-          )}
-          {!collapsed && (
-            <Tooltip content={t('Feedback')}>
-              <a href="https://github.com/chathub-dev/chathub/issues" target="_blank" rel="noreferrer">
-                <IconButton icon={feedbackIcon} />
-              </a>
-            </Tooltip>
-          )}
-          {!collapsed && (
-            <Tooltip content={t('Display')}>
-              <a onClick={() => setThemeSettingModalOpen(true)}>
-                <IconButton icon={themeIcon} />
-              </a>
-            </Tooltip>
-          )}
-          <Tooltip content={t('Settings')}>
-            <Link to="/setting">
-              <IconButton icon={settingIcon} />
-            </Link>
-          </Tooltip>
-        </div>
-      </div>
-      <GuideModal />
-      <ThemeSettingModal open={themeSettingModalOpen} onClose={() => setThemeSettingModalOpen(false)} />
-    </motion.aside>
-  )
-}
-
-export default Sidebar
+export default PremiumPage
